@@ -1,7 +1,7 @@
 tiziano_local:
   paths:
-    src_path: "/Users/tizianocausin/Desktop/temporal_context/python_scripts/src"
-    matlab_src_path: "/Users/tizianocausin/Desktop/temporal_context/matlab_scripts/src"
+    src_path: "/Users/tizianocausin/Desktop/metric_II/python_scripts/src"
+    matlab_src_path: "/Users/tizianocausin/Desktop/metrics_II/matlab_scripts/src"
     livingstone_lab: "/Volumes/LivingstoneLab"
     data_formatted: "/Volumes/LivingstoneLab/Data/Data-Formatted"
     data_neuropixels: "/Volumes/LivingstoneLab/Data/Data-Neuropixels-Preprocessed"
@@ -9,9 +9,10 @@ tiziano_local:
 
 tiziano_mac_mini:
   paths:
-    src_path: "/Users/tizianocausin/Desktop/temporal_context/python_scripts/src"
-    matlab_src_path: "/Users/tizianocausin/Desktop/temporal_context/matlab_scripts/src"
+    src_path: "/Users/tizianocausin/Desktop/metrics_II/python_scripts/src"
+    matlab_src_path: "/Users/tizianocausin/Desktop/metrics_II/matlab_scripts/src"
     livingstone_lab: "/Users/tizianocausin/livingstone_lab_local"
+    data_path: "/Users/tizianocausin/livingstone_lab_local/tiziano/metrics_II"
     data_formatted: "/Volumes/LivingstoneLab/Data/Data-Formatted"
     data_neuropixels: "/Volumes/LivingstoneLab/Data/Data-Neuropixels-Preprocessed"
     useful_stuff_path: "/Users/tizianocausin/Desktop/useful_stuff/python_scripts/src"
@@ -19,8 +20,8 @@ tiziano_mac_mini:
 
 o2_cluster:
   paths:
-    src_path: "/home/tic569/temporal_context/python_scripts/src"
-    matlab_src_path: "/home/tic569/temporal_context/matlab_scripts/src"
+    src_path: "/home/tic569/metrics_II/python_scripts/src"
+    matlab_src_path: "/home/tic569/metrics_II/matlab_scripts/src"
     livingstone_lab: "/n/data2/hms/neurobio/livingstone"
     data_formatted: "/n/data2/hms/neurobio/livingstone/Data/Formatted"
     data_neuropixels: "/n/data2/hms/neurobio/livingstone/Data/Npx-Preprocessed"
