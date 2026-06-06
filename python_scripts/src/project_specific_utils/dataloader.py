@@ -1,3 +1,15 @@
+import os, sys, yaml
+import numpy as np
+from pathlib import Path
+import h5py
+import re
+ENV = os.getenv("MY_ENV", "dev")
+with open("../../config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+paths = config[ENV]["paths"]
+sys.path.append(paths["src_path"])
+sys.path.append(paths["useful_stuff_path"])
+from useful_stuff.general_utils.utils import TimeSeries
 
 """
 decode_matlab_strings
@@ -43,7 +55,7 @@ OUTPUT:
 - rasters: TimeSeries -> preprocessed neural raster time series
 """
 def load_img_natraster(paths: dict[str: str], monkey_name, date, new_fs=None, brain_area=None):
-    rasters_path = f"{paths['livingstone_lab']}/tiziano/data/{monkey_name}_natraster{date}.mat"
+    rasters_path = f"{paths['data_path']}/data/{monkey_name}_natraster{date}.mat"
     with h5py.File(rasters_path, "r") as f:
         rasters = f["natraster"][:]      
     rasters = rasters.astype(np.float32)
@@ -123,4 +135,66 @@ class BrainAreas:
         return brain_area_response
     # EOF
 # EOC
+
+
+"""
+map_image_order_from_ann_to_monkey
+Creates an index mapping to align ANN image order with monkey presentation order.
+
+What this function does:
+1) Loads the list of images presented to the monkey from a MATLAB file
+2) Decodes MATLAB string references into Python strings
+3) Removes duplicate image names while preserving order
+4) Extracts the ANN image presentation order from the dataset
+5) Computes the index mapping from monkey order to ANN order
+
+INPUT:
+- paths: dict -> dictionary with base paths
+- monkey_name: str -> monkey identifier
+- date: str -> experiment date
+- dataset: torchvision.datasets.ImageFolder -> ANN image dataset
+
+OUTPUT:
+- mapping_idx: list[int] -> indices to reorder ANN features to monkey order
+"""
+def map_image_order_from_ann_to_monkey(paths, monkey_name, date, dataset):
+    allimgs_path = f"{paths['data_path']}/data/{monkey_name}_allimages{date}.mat"
+    with h5py.File(allimgs_path, "r") as f:
+        try:
+            refs = f["allimages"][:]      # shape (N, 1) of object refs
+        except KeyError:
+            refs = f["uniqueImage"][:]
+        # end try:
+        monkey_presentation_order = decode_matlab_strings(f, refs)
+        monkey_presentation_order = sorted(set(monkey_presentation_order))
+    ann_presentation_order = [os.path.basename(path) for path, _ in dataset.samples] # creates the order with which images are presented to the ANN
+    if os.path.basename(Path(dataset.root))=="talia_20each_tizi": # little detour because I have changed the filenames for talia_20each_tizi
+        monkey_presentation_order = rename_talia_dataset(monkey_presentation_order)
+    # end if dataset=="talia_20each_tizi":
+    mapping_idx = [ann_presentation_order.index(x) for x in monkey_presentation_order] # Creates a mapping from the monkey to the ann presentation order
+    newly_ordered_ann = [ann_presentation_order[i] for i in mapping_idx]
+    assert newly_ordered_ann == monkey_presentation_order
+    return mapping_idx # by applying this to the ann features we'll get the same order as the monkeys'
+# EOF
+
+
+"""
+rename_talia_dataset
+just renaming the names the same way I did in the folder also in the uniqueImages file, 
+otherwise I wouldn't be able to do the correct mapping. 
+We add an underscore between the image name and the number and we take off the spaces.
+"""
+def rename_talia_dataset(monkey_presentation_order):
+    monkey_presentation_order_renamed = []
+    for f in monkey_presentation_order:
+        # Step 1: insert underscore before first number following a letter
+        newname = re.sub(r'([a-zA-Z])([0-9])', r'\1_\2', f)
+        # Step 2: remove spaces
+        newname = newname.replace(' ', '')
+        # Rename if changed
+        monkey_presentation_order_renamed.append(newname)
+    # end for f in monkey_presentation_order:
+    return monkey_presentation_order_renamed
+# EOF
+
 
