@@ -12,7 +12,7 @@ tiziano_mac_mini:
     src_path: "/Users/tizianocausin/Desktop/metrics_II/python_scripts/src"
     matlab_src_path: "/Users/tizianocausin/Desktop/metrics_II/matlab_scripts/src"
     livingstone_lab: "/Users/tizianocausin/livingstone_lab_local"
-    data_path: "/Users/tizianocausin/livingstone_lab_local/tiziano/metrics_II"
+    data_path: "/Users/tizianocausin/metrics_II_local"
     data_formatted: "/Volumes/LivingstoneLab/Data/Data-Formatted"
     data_neuropixels: "/Volumes/LivingstoneLab/Data/Data-Neuropixels-Preprocessed"
     useful_stuff_path: "/Users/tizianocausin/Desktop/useful_stuff/python_scripts/src"
