@@ -1,6 +1,8 @@
 import os, sys, yaml
-ENV = os.getenv("MY_ENV", "dev")
-with open("../../config.yaml", "r") as f:
+from pathlib import Path
+ENV = os.getenv("MY_ENV", "tiziano_mac_mini")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+with open(PROJECT_ROOT / "config.yaml", "r") as f:
     config = yaml.safe_load(f)
 paths = config[ENV]["paths"]
 sys.path.append(paths["src_path"])
