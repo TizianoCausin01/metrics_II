@@ -1,0 +1,38 @@
+#!/bin/bash
+
+#SBATCH --nodes=1
+#SBATCH --time=12:00:00
+#SBATCH --ntasks=5
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=100G
+#SBATCH --partition=all-compute
+#SBATCH --job-name=static_dRSA
+#SBATCH --output=/home/tiziano.causin/output_jobs/%x.%j.out
+
+set -e
+source ~/.bashrc
+cd /home/tiziano.causin/metrics_II/python_scripts/scripts
+conda deactivate
+source ~/metrics_II/.venv/bin/activate
+
+export MY_ENV=o2_cluster
+export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export NUMEXPR_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_HOME=/home/tiziano.causin/.cache/huggingface
+
+mpiexec -np ${SLURM_NTASKS} python3 run_static_dRSA.py \
+    --monkey_name "${monkey_name}" \
+    --date "${date}" \
+    --brain_area "${brain_area:-AIT}" \
+    --folder_name "${folder_name}" \
+    --signal_RDM_metric "${signal_RDM_metric:-cosine}" \
+    --model_RDM_metric "${model_RDM_metric:-euclidean}" \
+    --model_name "${model_name}" \
+    --img_size "${img_size:-384}" \
+    --pooling "${pooling:-mean}" \
+    --new_fs "${new_fs:-100}" \
+    --pkg "${pkg:-timm}"
