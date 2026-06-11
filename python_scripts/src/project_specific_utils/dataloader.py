@@ -3,8 +3,9 @@ import numpy as np
 from pathlib import Path
 import h5py
 import re
-ENV = os.getenv("MY_ENV", "dev")
-with open("../../config.yaml", "r") as f:
+ENV = os.getenv("MY_ENV", "tiziano_mac_mini")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+with open(PROJECT_ROOT / "config.yaml", "r") as f:
     config = yaml.safe_load(f)
 paths = config[ENV]["paths"]
 sys.path.append(paths["src_path"])
@@ -196,5 +197,4 @@ def rename_talia_dataset(monkey_presentation_order):
     # end for f in monkey_presentation_order:
     return monkey_presentation_order_renamed
 # EOF
-
 
