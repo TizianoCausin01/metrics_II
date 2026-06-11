@@ -58,3 +58,38 @@ def compute_static_dRSA(
     print_wise(f"model saved at {save_name}", rank=rank)
     return drsa
 # EOF
+
+
+def compute_static_dynII(
+    paths: dict[str, str],
+    rank: int,
+    layer_name: str,
+    dyn_ii_obj: "dynInformationImbalance",
+    idx_ord: np.ndarray,
+    monkey_name: str,
+    date: str,
+    brain_area: str,
+    folder_name: str,
+    model_name: str,
+    img_size: int,
+    pooling: str,
+) -> tuple["TimeSeries", "TimeSeries"]:
+    fs = dyn_ii_obj.get_RDM_timeseries("signal").get_fs()
+    save_name_A2B = f"{paths['data_path']}/results/dynII_A2B_k{dyn_ii_obj.k}_{dyn_ii_obj.signal_RDM_metric}-{dyn_ii_obj.model_RDM_metric}_{monkey_name}_{date}_{brain_area}_{model_name}_{img_size}_{layer_name}_{fs}Hz.npz"
+    save_name_B2A = f"{paths['data_path']}/results/dynII_B2A_k{dyn_ii_obj.k}_{dyn_ii_obj.signal_RDM_metric}-{dyn_ii_obj.model_RDM_metric}_{monkey_name}_{date}_{brain_area}_{model_name}_{img_size}_{layer_name}_{fs}Hz.npz"
+    if os.path.exists(save_name_A2B) and os.path.exists(save_name_B2A):
+        print_wise(f"model already exists at {save_name_A2B}", rank=rank)
+        return
+    if not hasattr(dyn_ii_obj, "signal_distance_ranks_timeseries"):
+        raise AttributeError("dyn_ii_obj must have 'signal_distance_ranks_timeseries'")
+    # end if not hasattr(dyn_ii_obj, "signal_distance_ranks_timeseries"):
+    feats_filename = f"{paths['data_path']}/models/{folder_name}_{model_name}_{img_size}_{layer_name}_features_{pooling}pool.npz"
+    features = np.load(feats_filename)["arr_0"][:, idx_ord]
+    dyn_ii_obj.compute_RDM(features, "model")
+    dyn_ii_obj.compute_distance_ranks("model")
+    dyn_ii_A2B, dyn_ii_B2A = dyn_ii_obj.compute_both_static_dynII()
+    np.savez_compressed(save_name_A2B, dyn_ii_A2B.get_array())
+    np.savez_compressed(save_name_B2A, dyn_ii_B2A.get_array())
+    print_wise(f"model saved at {save_name_A2B}", rank=rank)
+    return dyn_ii_A2B, dyn_ii_B2A
+# EOF

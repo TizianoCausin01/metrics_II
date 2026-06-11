@@ -1,0 +1,40 @@
+#!/bin/bash
+
+#SBATCH --nodes=1
+#SBATCH --time=12:00:00
+#SBATCH --ntasks=5
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=50G
+#SBATCH --partition=all-compute-cpu
+#SBATCH --job-name=static_dynII
+#SBATCH --output=/home/tiziano.causin/output_jobs/%x.%j.out
+
+set -e
+source ~/.bashrc
+cd /home/tiziano.causin/metrics_II/python_scripts/scripts
+conda deactivate
+source ~/metrics_II/.venv/bin/activate
+
+export MY_ENV=dipsen_hpc
+export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export NUMEXPR_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export HDF5_USE_FILE_LOCKING=FALSE
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_HOME=/home/tiziano.causin/.cache/huggingface
+
+mpiexec -np ${SLURM_NTASKS} python3 run_static_dynII.py \
+    --monkey_name "${monkey_name}" \
+    --date "${date}" \
+    --brain_area "${brain_area}" \
+    --folder_name "${folder_name}" \
+    --signal_RDM_metric "${signal_RDM_metric}" \
+    --model_RDM_metric "${model_RDM_metric}" \
+    --model_name "${model_name}" \
+    --img_size "${img_size}" \
+    --pooling "${pooling}" \
+    --new_fs "${new_fs}" \
+    --pkg "${pkg}" \
+    --k "${k}"
