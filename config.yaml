@@ -5,7 +5,7 @@ tiziano_local:
     livingstone_lab: "/Volumes/LivingstoneLab"
     data_formatted: "/Volumes/LivingstoneLab/Data/Data-Formatted"
     data_neuropixels: "/Volumes/LivingstoneLab/Data/Data-Neuropixels-Preprocessed"
-
+    useful_stuff_path: "/Users/tizianocausin/Desktop/useful_stuff/python_scripts/src"
 
 tiziano_mac_mini:
   paths:
@@ -25,3 +25,6 @@ o2_cluster:
     livingstone_lab: "/n/data2/hms/neurobio/livingstone"
     data_formatted: "/n/data2/hms/neurobio/livingstone/Data/Formatted"
     data_neuropixels: "/n/data2/hms/neurobio/livingstone/Data/Npx-Preprocessed"
+    useful_stuff_path: "/home/tic569/useful_stuff/python_scripts/src"
+
+
