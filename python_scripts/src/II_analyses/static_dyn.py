@@ -93,3 +93,124 @@ def compute_static_dynII(
     print_wise(f"model saved at {save_name_A2B}", rank=rank)
     return dyn_ii_A2B, dyn_ii_B2A
 # EOF
+
+
+def static_dynII_save_name(
+    paths,
+    direction,
+    k,
+    signal_RDM_metric,
+    model_RDM_metric,
+    monkey_name,
+    date,
+    brain_area,
+    model_name,
+    img_size,
+    layer_name,
+    fs,
+    subsamples_size=None,
+    n_iterations=None,
+):
+    save_name = f"{paths['data_path']}/results/dynII_{direction}_k{k}_{signal_RDM_metric}-{model_RDM_metric}_{monkey_name}_{date}_{brain_area}_{model_name}_{img_size}_{layer_name}_{fs}Hz"
+    if subsamples_size is not None:
+        save_name += f"_{subsamples_size}subsamples"
+    if n_iterations is not None:
+        save_name += f"_{n_iterations}iterations"
+    return f"{save_name}.npz"
+# EOF
+
+
+def compute_static_dynII_subsampled(
+    paths: dict[str, str],
+    rank: int,
+    layer_name: str,
+    raster: "TimeSeries",
+    idx_ord: np.ndarray,
+    signal_RDM_metric: str,
+    model_RDM_metric: str,
+    k: int,
+    monkey_name: str,
+    date: str,
+    brain_area: str,
+    folder_name: str,
+    model_name: str,
+    img_size: int,
+    pooling: str,
+    subsamples_size: int,
+    n_iterations: int,
+    random_seed: int = 0,
+) -> tuple["TimeSeries", "TimeSeries"]:
+    save_name_A2B = static_dynII_save_name(
+        paths,
+        "A2B",
+        k,
+        signal_RDM_metric,
+        model_RDM_metric,
+        monkey_name,
+        date,
+        brain_area,
+        model_name,
+        img_size,
+        layer_name,
+        raster.get_fs(),
+        subsamples_size=subsamples_size,
+        n_iterations=n_iterations,
+    )
+    save_name_B2A = static_dynII_save_name(
+        paths,
+        "B2A",
+        k,
+        signal_RDM_metric,
+        model_RDM_metric,
+        monkey_name,
+        date,
+        brain_area,
+        model_name,
+        img_size,
+        layer_name,
+        raster.get_fs(),
+        subsamples_size=subsamples_size,
+        n_iterations=n_iterations,
+    )
+    if os.path.exists(save_name_A2B) and os.path.exists(save_name_B2A):
+        print_wise(f"model already exists at {save_name_A2B}", rank=rank)
+        return
+
+    raster_array = raster.get_array()
+    n_trials = raster_array.shape[2]
+    if subsamples_size > n_trials:
+        raise ValueError(
+            f"subsamples_size={subsamples_size} exceeds available trials ({n_trials})"
+        )
+    if n_iterations < 1:
+        raise ValueError("n_iterations must be >= 1")
+
+    feats_filename = f"{paths['data_path']}/models/{folder_name}_{model_name}_{img_size}_{layer_name}_features_{pooling}pool.npz"
+    features = np.load(feats_filename)["arr_0"][:, idx_ord]
+
+    rng = np.random.default_rng(random_seed)
+    A2B_iterations = []
+    B2A_iterations = []
+    for _ in range(n_iterations):
+        subset = rng.choice(n_trials, size=subsamples_size, replace=False)
+        subset_raster = TimeSeries(raster_array[:, :, subset], raster.get_fs())
+        subset_features = features[:, subset]
+        dyn_ii_obj = init_static_dynII(
+            subset_raster,
+            signal_RDM_metric,
+            model_RDM_metric,
+            k,
+        )
+        dyn_ii_obj.compute_RDM(subset_features, "model")
+        dyn_ii_obj.compute_distance_ranks("model")
+        dyn_ii_A2B, dyn_ii_B2A = dyn_ii_obj.compute_both_static_dynII()
+        A2B_iterations.append(dyn_ii_A2B.get_array())
+        B2A_iterations.append(dyn_ii_B2A.get_array())
+
+    mean_A2B = TimeSeries(np.mean(A2B_iterations, axis=0), raster.get_fs())
+    mean_B2A = TimeSeries(np.mean(B2A_iterations, axis=0), raster.get_fs())
+    np.savez_compressed(save_name_A2B, mean_A2B.get_array())
+    np.savez_compressed(save_name_B2A, mean_B2A.get_array())
+    print_wise(f"model saved at {save_name_A2B}", rank=rank)
+    return mean_A2B, mean_B2A
+# EOF
