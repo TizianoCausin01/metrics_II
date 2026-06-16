@@ -6,10 +6,15 @@ __all__ = [
     'compute_static_dynII_subsampled',
     'compute_static_dRSA',
     'compare_similarity_metrics',
+    'RSA_compare_similarity_metrics',
     'dyn_compare_similarity_metrics',
+    'dyn_RSA_compare_similarity_metrics',
+    'dyn_RSA_compare_similarity_metrics_subsampled',
     'dyn_compare_similarity_metrics_subsampled',
     'metric_comparison_save_name',
+    'RSA_metric_comparison_save_name',
     'save_metric_comparison',
+    'save_RSA_metric_comparison',
 ]
 
 from .static_dyn import (
@@ -21,8 +26,13 @@ from .static_dyn import (
 )
 from .metrics_comparison import (
     compare_similarity_metrics,
+    RSA_compare_similarity_metrics,
     dyn_compare_similarity_metrics,
+    dyn_RSA_compare_similarity_metrics,
+    dyn_RSA_compare_similarity_metrics_subsampled,
     dyn_compare_similarity_metrics_subsampled,
     metric_comparison_save_name,
+    RSA_metric_comparison_save_name,
     save_metric_comparison,
+    save_RSA_metric_comparison,
 )
