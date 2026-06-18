@@ -57,6 +57,22 @@ def RSA_compare_similarity_metrics(data: np.ndarray, metric1: str, metric2: str,
 # EOF
 
 
+def compare_layer_distances(
+    features_A: np.ndarray,
+    features_B: np.ndarray,
+    metric_A: str,
+    metric_B: str,
+    k: int,
+):
+    ii_obj = InformationImbalance(metric_A, metric_B, k)
+    ii_obj.compute_RDM(features_A, "signal")
+    ii_obj.compute_RDM(features_B, "model")
+    ii_obj.compute_both_distance_ranks()
+    ii_A2B, ii_B2A = ii_obj.compute_both_II()
+    return ii_obj, ii_A2B, ii_B2A
+# EOF
+
+
 """
 metric_comparison_save_name
 Builds the output path for metric-comparison results.
@@ -119,6 +135,27 @@ def RSA_metric_comparison_save_name(
     n_iterations=None,
 ):
     save_name = f"{paths['data_path']}/results/RSA_metric_comparison_{mt_A}-{mt_B}_{monkey_name}_{date}_{brain_area}_{new_fs}Hz"
+    if subsamples_size is not None:
+        save_name += f"_{subsamples_size}subsamples"
+    if n_iterations is not None:
+        save_name += f"_{n_iterations}iterations"
+    return f"{save_name}.npz"
+# EOF
+
+
+def layer_distance_comparison_save_name(
+    paths,
+    direction,
+    metric_A,
+    metric_B,
+    k,
+    folder_name,
+    model_name,
+    img_size,
+    subsamples_size=None,
+    n_iterations=None,
+):
+    save_name = f"{paths['data_path']}/results/layer_distance_comparison_{direction}_k{k}_{metric_A}-{metric_B}_{folder_name}_{model_name}_{img_size}"
     if subsamples_size is not None:
         save_name += f"_{subsamples_size}subsamples"
     if n_iterations is not None:
@@ -215,6 +252,189 @@ def save_RSA_metric_comparison(
     os.makedirs(os.path.dirname(save_name), exist_ok=True)
     np.savez_compressed(save_name, values)
     return save_name
+# EOF
+
+
+def _load_layer_features(paths, folder_name, model_name, img_size, layer_name, pooling):
+    feats_filename = f"{paths['data_path']}/models/{folder_name}_{model_name}_{img_size}_{layer_name}_features_{pooling}pool.npz"
+    return np.load(feats_filename)["arr_0"]
+# EOF
+
+
+def layer_distance_comparison(
+    paths,
+    rank,
+    metrics_tuple,
+    layers,
+    k,
+    folder_name,
+    model_name,
+    img_size,
+    pooling,
+):
+    metric_A, metric_B = metrics_tuple
+    save_name_A2B = layer_distance_comparison_save_name(
+        paths,
+        "A2B",
+        metric_A,
+        metric_B,
+        k,
+        folder_name,
+        model_name,
+        img_size,
+    )
+    save_name_B2A = layer_distance_comparison_save_name(
+        paths,
+        "B2A",
+        metric_A,
+        metric_B,
+        k,
+        folder_name,
+        model_name,
+        img_size,
+    )
+    if os.path.exists(save_name_A2B) and os.path.exists(save_name_B2A):
+        print_wise(f"model already exists at {save_name_A2B}", rank=rank)
+        return
+
+    features_by_layer = {
+        layer: _load_layer_features(
+            paths, folder_name, model_name, img_size, layer, pooling
+        )
+        for layer in layers
+    }
+    n_layers = len(layers)
+    A2B_matrix = np.full((n_layers, n_layers), np.nan)
+    B2A_matrix = np.full((n_layers, n_layers), np.nan)
+    for idx_A, layer_A in enumerate(layers):
+        for idx_B, layer_B in enumerate(layers):
+            _, A2B, B2A = compare_layer_distances(
+                features_by_layer[layer_A],
+                features_by_layer[layer_B],
+                metric_A,
+                metric_B,
+                k,
+            )
+            A2B_matrix[idx_A, idx_B] = A2B
+            B2A_matrix[idx_A, idx_B] = B2A
+
+    os.makedirs(os.path.dirname(save_name_A2B), exist_ok=True)
+    np.savez_compressed(
+        save_name_A2B,
+        A2B_matrix,
+        layers=np.array(layers),
+        metrics=np.array([metric_A, metric_B]),
+    )
+    np.savez_compressed(
+        save_name_B2A,
+        B2A_matrix,
+        layers=np.array(layers),
+        metrics=np.array([metric_A, metric_B]),
+    )
+    print_wise(f"comparison saved at {save_name_A2B}", rank=rank)
+# EOF
+
+
+def layer_distance_comparison_subsampled(
+    paths,
+    rank,
+    metrics_tuple,
+    layers,
+    k,
+    folder_name,
+    model_name,
+    img_size,
+    pooling,
+    subsamples_size,
+    n_iterations,
+    random_seed=None,
+):
+    metric_A, metric_B = metrics_tuple
+    save_name_A2B = layer_distance_comparison_save_name(
+        paths,
+        "A2B",
+        metric_A,
+        metric_B,
+        k,
+        folder_name,
+        model_name,
+        img_size,
+        subsamples_size=subsamples_size,
+        n_iterations=n_iterations,
+    )
+    save_name_B2A = layer_distance_comparison_save_name(
+        paths,
+        "B2A",
+        metric_A,
+        metric_B,
+        k,
+        folder_name,
+        model_name,
+        img_size,
+        subsamples_size=subsamples_size,
+        n_iterations=n_iterations,
+    )
+    if os.path.exists(save_name_A2B) and os.path.exists(save_name_B2A):
+        print_wise(f"model already exists at {save_name_A2B}", rank=rank)
+        return
+
+    if n_iterations < 1:
+        raise ValueError("n_iterations must be >= 1")
+
+    features_by_layer = {
+        layer: _load_layer_features(
+            paths, folder_name, model_name, img_size, layer, pooling
+        )
+        for layer in layers
+    }
+    n_images = next(iter(features_by_layer.values())).shape[1]
+    for layer, features in features_by_layer.items():
+        if features.shape[1] != n_images:
+            raise ValueError(
+                f"Layer feature matrices must have the same number of images: "
+                f"expected {n_images}, {layer} has {features.shape[1]}"
+            )
+    if subsamples_size > n_images:
+        raise ValueError(
+            f"subsamples_size={subsamples_size} exceeds available images ({n_images})"
+        )
+
+    rng = np.random.default_rng(random_seed)
+    n_layers = len(layers)
+    A2B_iterations = np.empty((n_iterations, n_layers, n_layers))
+    B2A_iterations = np.empty((n_iterations, n_layers, n_layers))
+    for iter_idx in range(n_iterations):
+        subset = rng.choice(n_images, size=subsamples_size, replace=False)
+        iteration_A2B = np.full((n_layers, n_layers), np.nan)
+        iteration_B2A = np.full((n_layers, n_layers), np.nan)
+        for idx_A, layer_A in enumerate(layers):
+            for idx_B, layer_B in enumerate(layers):
+                _, A2B, B2A = compare_layer_distances(
+                    features_by_layer[layer_A][:, subset],
+                    features_by_layer[layer_B][:, subset],
+                    metric_A,
+                    metric_B,
+                    k,
+                )
+                iteration_A2B[idx_A, idx_B] = A2B
+                iteration_B2A[idx_A, idx_B] = B2A
+        A2B_iterations[iter_idx] = iteration_A2B
+        B2A_iterations[iter_idx] = iteration_B2A
+
+    os.makedirs(os.path.dirname(save_name_A2B), exist_ok=True)
+    np.savez_compressed(
+        save_name_A2B,
+        np.mean(A2B_iterations, axis=0),
+        layers=np.array(layers),
+        metrics=np.array([metric_A, metric_B]),
+    )
+    np.savez_compressed(
+        save_name_B2A,
+        np.mean(B2A_iterations, axis=0),
+        layers=np.array(layers),
+        metrics=np.array([metric_A, metric_B]),
+    )
+    print_wise(f"comparison saved at {save_name_A2B}", rank=rank)
 # EOF
 
 
