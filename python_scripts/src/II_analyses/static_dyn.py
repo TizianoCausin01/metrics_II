@@ -12,6 +12,7 @@ if "useful_stuff_path" in paths:
 from useful_stuff.general_utils.utils import TimeSeries, print_wise
 from useful_stuff.general_utils.II import InformationImbalance, dynInformationImbalance
 from useful_stuff.general_utils.RSA import dRSA
+from useful_stuff.general_utils.regression import dyn_linear_encoding
 
 
 def init_static_dynII(ba_raster: "TimeSeries", signal_RDM_metric, model_RDM_metric, k) -> "dynInformationImbalance":
@@ -57,6 +58,122 @@ def compute_static_dRSA(
     np.savez_compressed(save_name, drsa.get_array())
     print_wise(f"model saved at {save_name}", rank=rank)
     return drsa
+# EOF
+
+
+def preprocess_population_vectors(data, normalize=False, feature_center=False, mean_center=False):
+    """Preprocess a (features, images) population-vector matrix."""
+    data = np.asarray(data, dtype=float).copy()
+    if data.ndim != 2:
+        raise ValueError(f"Expected a 2D features-by-images array, got {data.shape}")
+    if feature_center:  # cosine_cnt: center every feature across images
+        data -= data.mean(axis=1, keepdims=True)
+    if mean_center:  # correlation: center each population vector across features
+        data -= data.mean(axis=0, keepdims=True)
+    if normalize:  # cosine: unit L2 norm for each population vector
+        norms = np.linalg.norm(data, axis=0, keepdims=True)
+        norms[norms == 0] = 1.0
+        data /= norms
+    return data
+# EOF
+
+
+def compute_static_linear_encoding(
+    paths,
+    rank,
+    layer_name,
+    raster,
+    idx_ord,
+    monkey_name,
+    date,
+    brain_area,
+    folder_name,
+    model_name,
+    img_size,
+    pooling,
+    regression_type,
+    score_type,
+    alphas,
+    cv_type,
+    n_splits,
+    normalize,
+    feature_center,
+    mean_center,
+):
+    """Cross-validate static model features against neural activity over time."""
+    preprocessing = []
+    if normalize:
+        preprocessing.append("norm")
+    if feature_center:
+        preprocessing.append("feat_cnt")
+    if mean_center:
+        preprocessing.append("mean_cnt")
+    preprocessing_label = "_".join(preprocessing) if preprocessing else "raw"
+    alpha_label = f"{np.min(alphas):g}to{np.max(alphas):g}_n{len(alphas)}"
+    fs = raster.get_fs()
+    save_name = (
+        f"{paths['data_path']}/results/static_linear_encoding_"
+        f"{regression_type}_{score_type}_{cv_type}_alpha{alpha_label}_"
+        f"{preprocessing_label}_{monkey_name}_{date}_{brain_area}_{model_name}_"
+        f"{img_size}_{layer_name}_{fs}Hz.npz"
+    )
+    if os.path.exists(save_name):
+        print_wise(f"model already exists at {save_name}", rank=rank)
+        return
+
+    features_path = (
+        f"{paths['data_path']}/models/{folder_name}_{model_name}_{img_size}_"
+        f"{layer_name}_features_{pooling}pool.npz"
+    )
+    features = np.load(features_path)["arr_0"][:, idx_ord]
+    features = preprocess_population_vectors(
+        features, normalize, feature_center, mean_center
+    )
+    raster_array = raster.get_array()
+    if raster_array.ndim != 3:
+        raise ValueError(
+            "Expected neural raster data with shape (neurons, timepoints, images)."
+        )
+    if features.shape[1] != raster_array.shape[2]:
+        raise ValueError(
+            "Model features and neural raster have different image counts: "
+            f"{features.shape[1]} and {raster_array.shape[2]}."
+        )
+    processed_raster = np.stack(
+        [
+            preprocess_population_vectors(
+                raster_array[:, timepoint, :], normalize, feature_center, mean_center
+            )
+            for timepoint in range(raster_array.shape[1])
+        ],
+        axis=1,
+    )
+    encoding = dyn_linear_encoding(
+        regression_type=regression_type,
+        cv_type=cv_type,
+        max_lag=0,
+        alphas=np.asarray(alphas, dtype=float),
+        score_type=score_type,
+        n_splits=n_splits,
+    )
+    time_scores = []
+    n_timepoints = processed_raster.shape[1]
+    for timepoint in range(n_timepoints):
+        print_wise(
+            f"{layer_name}: timepoint {timepoint + 1}/{n_timepoints}", rank=rank
+        )
+        time_score = encoding.crossvalidate_static_dyn(
+            features, TimeSeries(processed_raster[:, timepoint:timepoint + 1, :], fs)
+        )
+        time_scores.append(time_score.get_array()[..., 0])
+        print_wise(
+            f"{layer_name}: completed timepoint {timepoint + 1}/{n_timepoints}",
+            rank=rank,
+        )
+    scores = TimeSeries(np.stack(time_scores, axis=-1), fs)
+    np.savez_compressed(save_name, scores.get_array())
+    print_wise(f"model saved at {save_name}", rank=rank)
+    return scores
 # EOF
 
 
