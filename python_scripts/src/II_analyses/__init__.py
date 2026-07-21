@@ -19,6 +19,15 @@ __all__ = [
     'RSA_metric_comparison_save_name',
     'save_metric_comparison',
     'save_RSA_metric_comparison',
+    'PREPROCESSING_CONFIGS',
+    'select_balanced_images',
+    'make_repetition_tensor',
+    'compute_repetition_decoder_outputs',
+    'compute_centroid_trial_metrics',
+    'summarize_decoder_outputs',
+    'crossvalidate_decoding_over_repetitions',
+    'paired_normalization_statistics',
+    'find_margin_only_differences',
 ]
 
 from .static_dyn import (
@@ -43,4 +52,15 @@ from .metrics_comparison import (
     RSA_metric_comparison_save_name,
     save_metric_comparison,
     save_RSA_metric_comparison,
+)
+from .decoding import (
+    PREPROCESSING_CONFIGS,
+    select_balanced_images,
+    make_repetition_tensor,
+    compute_repetition_decoder_outputs,
+    compute_centroid_trial_metrics,
+    summarize_decoder_outputs,
+    crossvalidate_decoding_over_repetitions,
+    paired_normalization_statistics,
+    find_margin_only_differences,
 )
