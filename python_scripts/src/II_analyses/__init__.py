@@ -5,6 +5,11 @@ __all__ = [
     'compute_static_dynII',
     'compute_static_dynII_subsampled',
     'compute_static_dRSA',
+    'compute_static_dRSA_subsampled',
+    'static_dRSA_save_name',
+    'init_static_dCKA',
+    'compute_static_dCKA_subsampled',
+    'static_dCKA_save_name',
     'compare_similarity_metrics',
     'RSA_compare_similarity_metrics',
     'compare_layer_distances',
@@ -36,6 +41,11 @@ from .static_dyn import (
     compute_static_dynII,
     compute_static_dynII_subsampled,
     compute_static_dRSA,
+    compute_static_dRSA_subsampled,
+    static_dRSA_save_name,
+    init_static_dCKA,
+    compute_static_dCKA_subsampled,
+    static_dCKA_save_name,
 )
 from .metrics_comparison import (
     compare_similarity_metrics,

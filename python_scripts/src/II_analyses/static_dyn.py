@@ -12,6 +12,7 @@ if "useful_stuff_path" in paths:
 from useful_stuff.general_utils.utils import TimeSeries, print_wise
 from useful_stuff.general_utils.II import InformationImbalance, dynInformationImbalance
 from useful_stuff.general_utils.RSA import dRSA
+from useful_stuff.general_utils.CKA import dCKA
 from useful_stuff.general_utils.regression import dyn_linear_encoding
 
 
@@ -30,6 +31,80 @@ def init_static_dRSA(ba_raster: "TimeSeries", signal_RDM_metric, model_RDM_metri
 # EOF
 
 
+"""
+init_static_dCKA
+Initializes static dCKA and computes the dynamic neural Gram matrices.
+
+INPUT:
+    - ba_raster: TimeSeries -> neural responses with shape (features, time, samples).
+    - signal_metric, model_metric: str -> neural and model Gram metrics.
+    - method: str -> HSIC estimator, either "biased" or "unbiased".
+    - signal_metric_type, model_metric_type: str -> "kernel" or "distance".
+
+OUTPUT:
+    - dcka_obj: dCKA -> initialized object containing neural Gram matrices over time.
+"""
+def init_static_dCKA(
+    ba_raster: "TimeSeries",
+    signal_metric: str,
+    model_metric: str,
+    method: str,
+    signal_metric_type: str,
+    model_metric_type: str,
+) -> "dCKA":
+    dcka_obj = dCKA(
+        signal_metric=signal_metric,
+        model_metric=model_metric,
+        method=method,
+        signal_metric_type=signal_metric_type,
+        model_metric_type=model_metric_type,
+    )
+    dcka_obj.compute_gram_timeseries(ba_raster, "signal")
+    return dcka_obj
+# EOF
+
+
+"""
+static_dRSA_save_name
+Builds the static-dRSA result filename, including optional subsampling settings.
+
+INPUT:
+    - paths: dict -> project paths containing data_path.
+    - signal_RDM_metric, model_RDM_metric: str -> metrics used to build the RDMs.
+    - monkey_name, date, brain_area: str -> neural recording identifiers.
+    - model_name, layer_name: str -> computational model identifiers.
+    - img_size: int -> model input image size.
+    - fs: int or float -> neural sampling frequency.
+    - subsamples_size, n_iterations: int or None -> optional subsampling settings.
+
+OUTPUT:
+    - save_name: str -> full path of the compressed NumPy result file.
+"""
+def static_dRSA_save_name(
+    paths,
+    signal_RDM_metric,
+    model_RDM_metric,
+    monkey_name,
+    date,
+    brain_area,
+    model_name,
+    img_size,
+    layer_name,
+    fs,
+    subsamples_size=None,
+    n_iterations=None,
+):
+    save_name = f"{paths['data_path']}/results/static_dRSA_{signal_RDM_metric}-{model_RDM_metric}_{monkey_name}_{date}_{brain_area}_{model_name}_{img_size}_{layer_name}_{fs}Hz"
+    if subsamples_size is not None:
+        save_name += f"_{subsamples_size}subsamples"
+    # end if subsamples_size is not None
+    if n_iterations is not None:
+        save_name += f"_{n_iterations}iterations"
+    # end if n_iterations is not None
+    return f"{save_name}.npz"
+# EOF
+
+
 def compute_static_dRSA(
     paths: dict[str, str],
     rank: int,
@@ -44,7 +119,18 @@ def compute_static_dRSA(
     img_size: int,
     pooling: str,
 ) -> "TimeSeries":
-    save_name = f"{paths['data_path']}/results/static_dRSA_{drsa_obj.signal_RDM_metric}-{drsa_obj.model_RDM_metric}_{monkey_name}_{date}_{brain_area}_{model_name}_{img_size}_{layer_name}_{drsa_obj.get_RDM_timeseries('signal').get_fs()}Hz.npz"
+    save_name = static_dRSA_save_name(
+        paths,
+        drsa_obj.signal_RDM_metric,
+        drsa_obj.model_RDM_metric,
+        monkey_name,
+        date,
+        brain_area,
+        model_name,
+        img_size,
+        layer_name,
+        drsa_obj.get_RDM_timeseries("signal").get_fs(),
+    )
     if os.path.exists(save_name):
         print_wise(f"model already exists at {save_name}", rank=rank)
         return
@@ -58,6 +144,294 @@ def compute_static_dRSA(
     np.savez_compressed(save_name, drsa.get_array())
     print_wise(f"model saved at {save_name}", rank=rank)
     return drsa
+# EOF
+
+
+"""
+compute_static_dRSA_subsampled
+Computes static dRSA on random trial subsets and saves the mean time course.
+
+INPUT:
+    - paths: dict -> project paths containing model and result directories.
+    - rank: int -> MPI worker rank used for logging.
+    - layer_name: str -> model layer processed by this worker task.
+    - raster: TimeSeries -> neural responses with trials/images on the last axis.
+    - idx_ord: np.ndarray -> mapping from model-feature order to neural trial order.
+    - signal_RDM_metric, model_RDM_metric: str -> metrics used to build the RDMs.
+    - monkey_name, date, brain_area: str -> neural recording identifiers.
+    - folder_name, model_name: str -> stimulus and computational model identifiers.
+    - img_size: int -> model input image size.
+    - pooling: str -> feature pooling method used in the saved model features.
+    - subsamples_size: int -> number of trials sampled without replacement.
+    - n_iterations: int -> number of random subsampling iterations.
+    - random_seed: int or None -> seed controlling the repeated trial subsets.
+
+OUTPUT:
+    - mean_dRSA: TimeSeries -> static-dRSA time course averaged across iterations.
+"""
+def compute_static_dRSA_subsampled(
+    paths: dict[str, str],
+    rank: int,
+    layer_name: str,
+    raster: "TimeSeries",
+    idx_ord: np.ndarray,
+    signal_RDM_metric: str,
+    model_RDM_metric: str,
+    monkey_name: str,
+    date: str,
+    brain_area: str,
+    folder_name: str,
+    model_name: str,
+    img_size: int,
+    pooling: str,
+    subsamples_size: int,
+    n_iterations: int,
+    random_seed: int = 0,
+) -> "TimeSeries":
+    # Keep the non-subsampled naming convention and append sampling metadata.
+    save_name = static_dRSA_save_name(
+        paths,
+        signal_RDM_metric,
+        model_RDM_metric,
+        monkey_name,
+        date,
+        brain_area,
+        model_name,
+        img_size,
+        layer_name,
+        raster.get_fs(),
+        subsamples_size=subsamples_size,
+        n_iterations=n_iterations,
+    )
+    if os.path.exists(save_name):
+        print_wise(f"model already exists at {save_name}", rank=rank)
+        return
+    # end if os.path.exists(save_name)
+
+    # Validate the requested sampling against the neural trial axis.
+    raster_array = raster.get_array()
+    n_trials = raster_array.shape[2]
+    if subsamples_size > n_trials:
+        raise ValueError(
+            f"subsamples_size={subsamples_size} exceeds available trials ({n_trials})"
+        )
+    # end if subsamples_size > n_trials
+    if n_iterations < 1:
+        raise ValueError("n_iterations must be >= 1")
+    # end if n_iterations < 1
+
+    # Load this layer's features once and align them to the neural image order.
+    feats_filename = f"{paths['data_path']}/models/{folder_name}_{model_name}_{img_size}_{layer_name}_features_{pooling}pool.npz"
+    features = np.load(feats_filename)["arr_0"][:, idx_ord]
+
+    # Use matching neural and model subsets in every iteration.
+    rng = np.random.default_rng(random_seed)
+    dRSA_iterations = []
+    for _ in range(n_iterations):
+        subset = rng.choice(n_trials, size=subsamples_size, replace=False)
+        subset_raster = TimeSeries(raster_array[:, :, subset], raster.get_fs())
+        subset_features = features[:, subset]
+
+        drsa_obj = init_static_dRSA(
+            subset_raster,
+            signal_RDM_metric,
+            model_RDM_metric,
+        )
+        drsa_obj.compute_RDM(subset_features, "model")
+        static_dRSA = drsa_obj.compute_static_dRSA()
+        dRSA_iterations.append(static_dRSA.get_array())
+    # end for _ in range(n_iterations)
+
+    # Average iteration curves without changing the original sampling frequency.
+    mean_dRSA = TimeSeries(np.mean(dRSA_iterations, axis=0), raster.get_fs())
+    np.savez_compressed(save_name, mean_dRSA.get_array())
+    print_wise(f"model saved at {save_name}", rank=rank)
+    return mean_dRSA
+# EOF
+
+
+"""
+static_dCKA_save_name
+Builds a static-dCKA result filename containing all CKA and subsampling settings.
+
+INPUT:
+    - paths: dict -> project paths containing data_path.
+    - signal_metric, model_metric: str -> neural and model Gram metrics.
+    - method: str -> HSIC estimator used for CKA.
+    - signal_metric_type, model_metric_type: str -> Gram construction approaches.
+    - monkey_name, date, brain_area: str -> neural recording identifiers.
+    - model_name, layer_name: str -> computational model identifiers.
+    - img_size: int -> model input image size.
+    - fs: int or float -> neural sampling frequency.
+    - subsamples_size, n_iterations: int or None -> optional subsampling settings.
+
+OUTPUT:
+    - save_name: str -> full path of the compressed NumPy result file.
+"""
+def static_dCKA_save_name(
+    paths,
+    signal_metric,
+    model_metric,
+    method,
+    signal_metric_type,
+    model_metric_type,
+    monkey_name,
+    date,
+    brain_area,
+    model_name,
+    img_size,
+    layer_name,
+    fs,
+    subsamples_size=None,
+    n_iterations=None,
+):
+    save_name = (
+        f"{paths['data_path']}/results/static_dCKA_{method}_"
+        f"{signal_metric_type}-{signal_metric}_"
+        f"{model_metric_type}-{model_metric}_{monkey_name}_{date}_{brain_area}_"
+        f"{model_name}_{img_size}_{layer_name}_{fs}Hz"
+    )
+    if subsamples_size is not None:
+        save_name += f"_{subsamples_size}subsamples"
+    # end if subsamples_size is not None
+    if n_iterations is not None:
+        save_name += f"_{n_iterations}iterations"
+    # end if n_iterations is not None
+    return f"{save_name}.npz"
+# EOF
+
+
+"""
+compute_static_dCKA_subsampled
+Computes static dCKA on random trial subsets and saves the mean time course.
+
+INPUT:
+    - paths: dict -> project paths containing model and result directories.
+    - rank: int -> MPI worker rank used for logging.
+    - layer_name: str -> model layer processed by this worker task.
+    - raster: TimeSeries -> neural responses with trials/images on the last axis.
+    - idx_ord: np.ndarray -> mapping from model-feature order to neural trial order.
+    - signal_metric, model_metric: str -> neural and model Gram metrics.
+    - method: str -> HSIC estimator, either "biased" or "unbiased".
+    - signal_metric_type, model_metric_type: str -> "kernel" or "distance".
+    - monkey_name, date, brain_area: str -> neural recording identifiers.
+    - folder_name, model_name: str -> stimulus and computational model identifiers.
+    - img_size: int -> model input image size.
+    - pooling: str -> feature pooling method used in the saved model features.
+    - subsamples_size: int -> number of trials sampled without replacement.
+    - n_iterations: int -> number of random subsampling iterations.
+    - random_seed: int or None -> seed controlling the repeated trial subsets.
+
+OUTPUT:
+    - mean_dCKA: TimeSeries -> static-dCKA time course averaged across iterations.
+"""
+def compute_static_dCKA_subsampled(
+    paths: dict[str, str],
+    rank: int,
+    layer_name: str,
+    raster: "TimeSeries",
+    idx_ord: np.ndarray,
+    signal_metric: str,
+    model_metric: str,
+    method: str,
+    signal_metric_type: str,
+    model_metric_type: str,
+    monkey_name: str,
+    date: str,
+    brain_area: str,
+    folder_name: str,
+    model_name: str,
+    img_size: int,
+    pooling: str,
+    subsamples_size: int,
+    n_iterations: int,
+    random_seed: int = 0,
+) -> "TimeSeries":
+    # Encode all CKA settings in the filename to prevent ambiguous results.
+    save_name = static_dCKA_save_name(
+        paths,
+        signal_metric,
+        model_metric,
+        method,
+        signal_metric_type,
+        model_metric_type,
+        monkey_name,
+        date,
+        brain_area,
+        model_name,
+        img_size,
+        layer_name,
+        raster.get_fs(),
+        subsamples_size=subsamples_size,
+        n_iterations=n_iterations,
+    )
+    if os.path.exists(save_name):
+        print_wise(f"model already exists at {save_name}", rank=rank)
+        return
+    # end if os.path.exists(save_name)
+
+    # Validate the neural trial axis before loading the model features.
+    raster_array = raster.get_array()
+    if raster_array.ndim != 3:
+        raise ValueError(
+            "Expected raster shape (features, timepoints, trials), "
+            f"received {raster_array.shape}."
+        )
+    # end if raster_array.ndim != 3
+
+    n_trials = raster_array.shape[2]
+    minimum_samples = 4 if method == "unbiased" else 2
+    if subsamples_size < minimum_samples:
+        raise ValueError(
+            f"method={method} requires at least {minimum_samples} samples, "
+            f"received subsamples_size={subsamples_size}"
+        )
+    # end if subsamples_size < minimum_samples
+    if subsamples_size > n_trials:
+        raise ValueError(
+            f"subsamples_size={subsamples_size} exceeds available trials ({n_trials})"
+        )
+    # end if subsamples_size > n_trials
+    if n_iterations < 1:
+        raise ValueError("n_iterations must be >= 1")
+    # end if n_iterations < 1
+
+    # Load this layer's features once and align them to the neural image order.
+    feats_filename = f"{paths['data_path']}/models/{folder_name}_{model_name}_{img_size}_{layer_name}_features_{pooling}pool.npz"
+    features = np.load(feats_filename)["arr_0"][:, idx_ord]
+    if features.shape[1] != n_trials:
+        raise ValueError(
+            "Model features and neural raster have different trial counts: "
+            f"{features.shape[1]} and {n_trials}."
+        )
+    # end if features.shape[1] != n_trials
+
+    # Compute CKA from matching neural and model subsets in every iteration.
+    rng = np.random.default_rng(random_seed)
+    dCKA_iterations = []
+    for _ in range(n_iterations):
+        subset = rng.choice(n_trials, size=subsamples_size, replace=False)
+        subset_raster = TimeSeries(raster_array[:, :, subset], raster.get_fs())
+        subset_features = features[:, subset]
+
+        dcka_obj = init_static_dCKA(
+            subset_raster,
+            signal_metric,
+            model_metric,
+            method,
+            signal_metric_type,
+            model_metric_type,
+        )
+        dcka_obj.compute_static_model_gram(subset_features)
+        static_dCKA = dcka_obj.compute_static_dCKA()
+        dCKA_iterations.append(static_dCKA.get_array())
+    # end for _ in range(n_iterations)
+
+    # Average iteration curves without changing the original sampling frequency.
+    mean_dCKA = TimeSeries(np.mean(dCKA_iterations, axis=0), raster.get_fs())
+    np.savez_compressed(save_name, mean_dCKA.get_array())
+    print_wise(f"model saved at {save_name}", rank=rank)
+    return mean_dCKA
 # EOF
 
 
