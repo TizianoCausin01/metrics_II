@@ -33,6 +33,15 @@ __all__ = [
     'crossvalidate_decoding_over_repetitions',
     'paired_normalization_statistics',
     'find_margin_only_differences',
+    'generate_parabola_branch',
+    'generate_gaussian_with_orthogonal_noise',
+    'validate_sample_spaces',
+    'pooled_r2',
+    'fit_bidirectional_ols',
+    'compute_bidirectional_ii',
+    'sigma_inverse_row_transform',
+    'run_asymmetry_pipeline',
+    'summarize_asymmetry_pipeline',
 ]
 
 from .static_dyn import (
@@ -73,4 +82,15 @@ from .decoding import (
     crossvalidate_decoding_over_repetitions,
     paired_normalization_statistics,
     find_margin_only_differences,
+)
+from .asymmetry_pipeline import (
+    generate_parabola_branch,
+    generate_gaussian_with_orthogonal_noise,
+    validate_sample_spaces,
+    pooled_r2,
+    fit_bidirectional_ols,
+    compute_bidirectional_ii,
+    sigma_inverse_row_transform,
+    run_asymmetry_pipeline,
+    summarize_asymmetry_pipeline,
 )
