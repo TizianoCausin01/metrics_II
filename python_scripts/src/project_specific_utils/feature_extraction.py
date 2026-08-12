@@ -268,7 +268,7 @@ def load_feature_extraction_inputs(
             model_source,
             revision=cfg.revision,
             trust_remote_code=cfg.trust_remote_code,
-            use_fast=False,
+            use_fast=True,
         )
         transform = ProcessorTransform(processor)
         model_input_key = "pixel_values"
@@ -391,7 +391,7 @@ def run_feature_extraction(paths: dict[str, str], cfg: FeatureExtractionCfg):
             model_source,
             revision=cfg.revision,
             trust_remote_code=cfg.trust_remote_code,
-            use_fast=False,
+            use_fast=True,
         )
         imgANN(
             model_name=cfg.model_name,
