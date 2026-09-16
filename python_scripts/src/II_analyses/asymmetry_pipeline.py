@@ -1,9 +1,29 @@
+import itertools
+
 import numpy as np
 import pandas as pd
+from scipy.spatial.distance import squareform
 from sklearn.decomposition import PCA
 
 from useful_stuff.general_utils.II import InformationImbalance
 from useful_stuff.general_utils.regression import linear_encoding
+from useful_stuff.general_utils.utils import create_RDM
+
+
+# create_RDM returns 1 - cosine for the cosine family, and 1 - cos(u, v) is
+# already half the squared Euclidean distance between the normalized (and, for
+# the centered variants, pre-centered) vectors. Those RDMs therefore enter
+# classical MDS as squared distances, whereas "euclidean" and "magnitude_diff"
+# return plain distances that must be squared first.
+RDM_IS_SQUARED_DISTANCE = {
+    "euclidean": False,
+    "magnitude_diff": False,
+    "cosine": True,
+    "cosine_cnt": True,
+    "cosine_mean_cnt": True,
+    "cosine_double_cnt": True,
+    "correlation": True,
+}
 
 
 """
@@ -841,5 +861,323 @@ def summarize_asymmetry_pipeline(result, source_name="source", target_name="targ
             )
         # end for direction, per_output_r2, pooled_score, ii_score
     # end for stage, fit_result, ii_result
+    return pd.DataFrame(rows)
+# EOF
+
+
+"""
+squared_distance_matrix_from_rdm
+Turn a condensed RDM into the full squared-distance matrix that classical MDS
+expects, using RDM_IS_SQUARED_DISTANCE to know whether the measure already
+returns squared distances.
+
+INPUT:
+    - rdm_vector: np.ndarray -> condensed RDM, shape (samples * (samples - 1) / 2,)
+    - metric: str -> measure used by create_RDM to build the RDM
+
+OUTPUT:
+    - squared_distances: np.ndarray -> full squared-distance matrix, shape (samples, samples)
+"""
+def squared_distance_matrix_from_rdm(rdm_vector, metric):
+    if metric not in RDM_IS_SQUARED_DISTANCE:
+        raise KeyError(
+            f"Unknown measure '{metric}'. Add it to RDM_IS_SQUARED_DISTANCE "
+            "stating whether its RDM holds squared distances."
+        )
+    # end if metric is unknown
+
+    rdm = squareform(np.asarray(rdm_vector, dtype=float))
+    if RDM_IS_SQUARED_DISTANCE[metric]:
+        # 1 - cos(u, v) = 0.5 * ||u_hat - v_hat||^2, so twice the RDM is the squared distance.
+        squared_distances = 2.0 * rdm
+    else:
+        squared_distances = rdm**2
+    # end if the RDM already holds squared distances
+    return squared_distances
+# EOF
+
+
+"""
+components_for_variance
+Count how many leading components are needed to reach a fraction of the total
+embedded variance.
+
+INPUT:
+    - cumulative_variance: np.ndarray -> cumulative share of the positive eigenvalues
+    - variance_explained: float -> fraction to reach, in (0, 1]
+
+OUTPUT:
+    - n_components: int -> smallest number of components reaching the fraction
+"""
+def components_for_variance(cumulative_variance, variance_explained):
+    if not 0 < variance_explained <= 1:
+        raise ValueError("variance_explained must lie in (0, 1].")
+    # end if variance_explained is invalid
+    n_components = int(np.searchsorted(cumulative_variance, variance_explained) + 1)
+    return min(n_components, len(cumulative_variance))
+# EOF
+
+
+"""
+participation_ratio
+Effective dimensionality of a spectrum: 1 when a single eigenvalue dominates and
+n when all n eigenvalues are equal. It reads the shape of the spectrum and is
+insensitive to its overall scale.
+
+INPUT:
+    - eigenvalues: np.ndarray -> non-negative eigenvalues
+
+OUTPUT:
+    - ratio: float -> participation ratio
+"""
+def participation_ratio(eigenvalues):
+    eigenvalues = np.asarray(eigenvalues, dtype=float)
+    squared_sum = np.sum(eigenvalues**2)
+    if squared_sum == 0:
+        raise ValueError("Participation ratio is undefined for a zero spectrum.")
+    # end if squared_sum == 0
+    return float(np.sum(eigenvalues) ** 2 / squared_sum)
+# EOF
+
+
+"""
+classical_mds_embedding
+Embed an RDM in Euclidean coordinates with classical MDS and keep the leading
+components that reach a target fraction of the embedded variance.
+
+INPUT:
+    - rdm_vector: np.ndarray -> condensed RDM, shape (samples * (samples - 1) / 2,)
+    - metric: str -> measure used by create_RDM to build the RDM
+    - variance_explained: float -> fraction of positive-eigenvalue mass to retain
+    - relative_tolerance: float -> eigenvalue cutoff relative to the largest eigenvalue
+
+OUTPUT:
+    - result: dict -> retained coordinates, full-rank coordinates, eigenvalues, and
+      the diagnostics needed to judge how faithful the embedding is
+"""
+def classical_mds_embedding(
+    rdm_vector,
+    metric,
+    variance_explained=0.99,
+    relative_tolerance=1e-10,
+):
+    if not 0 < variance_explained <= 1:
+        raise ValueError("variance_explained must lie in (0, 1].")
+    # end if variance_explained is invalid
+
+    squared_distances = squared_distance_matrix_from_rdm(rdm_vector, metric)
+    n_samples = squared_distances.shape[0]
+
+    # Double centering turns squared distances into the Gram matrix of centered points.
+    centering = np.eye(n_samples) - np.ones((n_samples, n_samples)) / n_samples
+    gram = -0.5 * centering @ squared_distances @ centering
+    gram = (gram + gram.T) / 2  # symmetrize away the round-off asymmetry
+
+    eigenvalues, eigenvectors = np.linalg.eigh(gram)
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
+
+    # Only positive eigenvalues carry real coordinates; the negative mass measures
+    # how far the measure is from being exactly Euclidean-embeddable.
+    active = eigenvalues > relative_tolerance * eigenvalues.max()
+    positive_mass = eigenvalues[active].sum()
+    negative_mass = float(-eigenvalues[eigenvalues < 0].sum() / positive_mass)
+
+    coordinates = eigenvectors[:, active] * np.sqrt(eigenvalues[active])
+    eigenvalue_shares = eigenvalues[active] / positive_mass
+    cumulative_variance = np.cumsum(eigenvalue_shares)
+    n_components = components_for_variance(cumulative_variance, variance_explained)
+
+    return {
+        "coordinates": coordinates[:, :n_components],
+        "full_coordinates": coordinates,
+        "eigenvalues": eigenvalues,
+        "eigenvalue_shares": eigenvalue_shares,
+        "cumulative_variance": cumulative_variance,
+        # Sum of the positive eigenvalues: the cloud's total dispersion in this
+        # measure's own units, so it is comparable only between measures that
+        # share units. Divided by the sample count it is the mean squared
+        # distance to the centroid.
+        "total_variance": float(positive_mass),
+        "participation_ratio": participation_ratio(eigenvalues[active]),
+        "n_components": n_components,
+        "full_rank": int(active.sum()),
+        "variance_kept": float(cumulative_variance[n_components - 1]),
+        "negative_eigenvalue_mass": negative_mass,
+    }
+# EOF
+
+
+"""
+embed_measures_with_mds
+Compute one RDM per distance measure on the same data and embed each of them
+with classical MDS.
+
+INPUT:
+    - data: np.ndarray -> responses with features in rows and samples in columns, shape (features, samples)
+    - metrics: sequence of str -> distance measures passed to create_RDM
+    - variance_explained: float -> fraction of embedded variance kept per measure
+
+OUTPUT:
+    - embeddings: dict -> measure name to the classical_mds_embedding result, with
+      the condensed RDM stored under "rdm"
+"""
+def embed_measures_with_mds(data, metrics, variance_explained=0.99):
+    data = np.asarray(data, dtype=float)
+    if data.ndim != 2:
+        raise ValueError(
+            f"data must be two-dimensional (features, samples), received {data.shape}."
+        )
+    # end if data.ndim != 2
+
+    embeddings = {}
+    for metric in metrics:
+        rdm = create_RDM(data, metric)
+        embedding = classical_mds_embedding(rdm, metric, variance_explained)
+        embedding["rdm"] = rdm
+        embeddings[metric] = embedding
+    # end for metric in metrics
+    return embeddings
+# EOF
+
+
+"""
+metric_asymmetry_table
+Run the asymmetry pipeline on every ordered pair of MDS-embedded measures and
+collect the linear and rank-based asymmetry side by side.
+
+Each row reports, for one direction A -> B: the pooled OLS R-squared of A
+predicting B (the linear part of the relation), 1 - II between the embeddings
+(the full, possibly nonlinear part), and 1 - II after both spaces are pushed
+through their reciprocal Sigma^-1 transform, which removes the linear
+anisotropy and leaves what OLS cannot account for.
+
+INPUT:
+    - embeddings: dict -> output of embed_measures_with_mds
+    - k: int -> number of nearest neighbors used by II
+    - metric_labels: dict or None -> short display names for the measures
+    - relative_tolerance: float or None -> numerical-rank cutoff for the two SVDs
+
+OUTPUT:
+    - table: pd.DataFrame -> one row per ordered pair of measures
+"""
+def metric_asymmetry_table(
+    embeddings,
+    k=1,
+    metric_labels=None,
+    relative_tolerance=None,
+):
+    metrics = list(embeddings)
+    metric_labels = {} if metric_labels is None else metric_labels
+    rows = []
+
+    for metric_A, metric_B in itertools.combinations(metrics, 2):
+        embedding_A = embeddings[metric_A]
+        embedding_B = embeddings[metric_B]
+        # The MDS coordinates are Euclidean by construction, so II runs on plain
+        # Euclidean distances in both spaces regardless of the original measure.
+        pipeline = run_asymmetry_pipeline(
+            embedding_A["coordinates"],
+            embedding_B["coordinates"],
+            source_metric="euclidean",
+            target_metric="euclidean",
+            k=k,
+            relative_tolerance=relative_tolerance,
+        )
+        # Reference II straight from the original RDMs: it should match the
+        # embedded II whenever the retained components describe the RDM well.
+        rdm_ii = InformationImbalance("euclidean", "euclidean", k=k)
+        rdm_ii.set_RDM(embedding_A["rdm"], "signal")
+        rdm_ii.set_RDM(embedding_B["rdm"], "model")
+        rdm_ii.compute_both_distance_ranks()
+        rdm_A2B, rdm_B2A = rdm_ii.compute_both_II()
+
+        for direction, source_metric, target_metric, r2, ii, ii_svd, ii_rdm in (
+            (
+                "A2B",
+                metric_A,
+                metric_B,
+                pipeline["original_fit"]["pooled_r2_source_to_target"],
+                pipeline["original_ii"]["source_to_target"],
+                pipeline["transformed_ii"]["source_to_target"],
+                rdm_A2B,
+            ),
+            (
+                "B2A",
+                metric_B,
+                metric_A,
+                pipeline["original_fit"]["pooled_r2_target_to_source"],
+                pipeline["original_ii"]["target_to_source"],
+                pipeline["transformed_ii"]["target_to_source"],
+                rdm_B2A,
+            ),
+        ):
+            rows.append(
+                {
+                    "direction": (
+                        f"{metric_labels.get(source_metric, source_metric)} -> "
+                        f"{metric_labels.get(target_metric, target_metric)}"
+                    ),
+                    "dim source": embeddings[source_metric]["n_components"],
+                    "dim target": embeddings[target_metric]["n_components"],
+                    "R2": r2,
+                    "1 - II": 1.0 - ii,
+                    "1 - II (Sigma^-1)": 1.0 - ii_svd,
+                    "1 - II (raw RDM)": 1.0 - float(ii_rdm),
+                }
+            )
+        # end for direction, source_metric, target_metric, r2, ii, ii_svd, ii_rdm
+    # end for metric_A, metric_B
+    return pd.DataFrame(rows)
+# EOF
+
+
+"""
+mds_dimensionality_table
+Summarize how many MDS components each measure needs and how Euclidean it is.
+
+INPUT:
+    - embeddings: dict -> output of embed_measures_with_mds
+    - metric_labels: dict or None -> short display names for the measures
+    - quantiles: sequence of float -> variance fractions to report a dimension for
+
+OUTPUT:
+    - table: pd.DataFrame -> one row per measure
+
+NOTES:
+    The full rank is capped by the number of recorded channels and saturates it
+    for any measure that does not project a dimension away, so it separates the
+    measures poorly. PR (participation ratio) and the low quantiles read the
+    shape of the spectrum instead and are the informative columns here.
+
+    PR is scale-free, so "total var" and "top eig." carry the scale it discards.
+    They live in each measure's own units: the cosine family is dimensionless and
+    bounded (1 - cos lies in [0, 2], so total var / n_samples cannot exceed 1),
+    while euclidean and magnitude_diff are in squared response units and can
+    therefore be compared with each other directly.
+"""
+def mds_dimensionality_table(embeddings, metric_labels=None, quantiles=(0.5, 0.9)):
+    metric_labels = {} if metric_labels is None else metric_labels
+    rows = []
+    for metric, embedding in embeddings.items():
+        row = {
+            "measure": metric_labels.get(metric, metric),
+            "PR": embedding["participation_ratio"],
+        }
+        for quantile in quantiles:
+            row[f"d{round(100 * quantile)}"] = components_for_variance(
+                embedding["cumulative_variance"], quantile
+            )
+        # end for quantile in quantiles
+        # PR reads only the shape of the spectrum, so carry the scale alongside it.
+        row["total var"] = embedding["total_variance"]
+        row["top eig."] = float(embedding["eigenvalues"][0])
+        row["top eig. share"] = float(embedding["eigenvalue_shares"][0])
+        row["dim (99% var)"] = embedding["n_components"]
+        row["full rank"] = embedding["full_rank"]
+        row["negative eig. mass"] = embedding["negative_eigenvalue_mass"]
+        rows.append(row)
+    # end for metric, embedding in embeddings.items()
     return pd.DataFrame(rows)
 # EOF
